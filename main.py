@@ -210,7 +210,7 @@ def post(handle: str, password: str):
 def post():
     """Handle Twitter login with Selenium"""
     try:
-        # Launch browser for Twitter login
+        # Launch browser for Twitter login with visible window
         driver = webdriver.Chrome()
         driver.get("https://twitter.com/i/flow/login")
         
@@ -529,8 +529,12 @@ def post_to_twitter(account, content):
     credentials = json.loads(account.credentials)
     cookies = credentials.get("cookies", [])
     
-    # Set up Selenium
-    driver = webdriver.Chrome()
+    # Set up Selenium in headless mode for posting
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    driver = webdriver.Chrome(options=options)
     driver.get("https://twitter.com")
     
     # Add saved cookies
@@ -553,11 +557,19 @@ def post_to_twitter(account, content):
         post_area = driver.find_element(By.CSS_SELECTOR, "[data-testid='tweetTextarea_0']")
         post_area.send_keys(content)
         
-        # Find and click the tweet button
-        tweet_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='tweetButton']"))
-        )
-        tweet_button.click()
+        # Find and click the tweet button - try multiple approaches
+        try:
+            # First try the data-testid approach
+            tweet_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='tweetButton']"))
+            )
+            tweet_button.click()
+        except:
+            # If that fails, look for a button containing the text "Post"
+            tweet_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//span[text()='Post']/ancestor::button"))
+            )
+            tweet_button.click()
         
         # Wait for the tweet to be posted
         time.sleep(5)  # Simple wait for tweet to post
