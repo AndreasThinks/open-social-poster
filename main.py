@@ -1,4 +1,5 @@
 from fasthtml.common import *
+from monsterui.all import *  # Import MonsterUI components
 import os
 import json
 import time
@@ -10,458 +11,272 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import requests
 
-# Create FastHTML app with PicoCSS
-app, rt = fast_app()
+# Setup FastHTML app with MonsterUI's blue theme and DaisyUI
+app, rt = fast_app(hdrs=Theme.blue.headers(daisy=True))
 
-# Create SQLite database and tables
+# SQLite database setup
 db = database("social_poster.db")
-
-# Define data models
 @dataclass
 class Account:
     id: int = None
-    network: str = None  # "bluesky", "twitter", "mastodon"
+    network: str = None
     username: str = None
-    credentials: str = None  # JSON string
+    credentials: str = None
     created_at: str = None
     updated_at: str = None
-
-# Create table if it doesn't exist
 accounts = db.create(Account, pk="id")
 
 # Mastodon OAuth configuration
 MASTODON_REDIRECT_URI = "http://localhost:5001/login/mastodon/callback"
-# We'll store client credentials per instance in the database
 
 # Main route
 @rt("/")
 def get():
-    """Main page showing credentials and post form"""
     active_accounts = list(accounts())
-    
-    return Titled("Social Media Poster",
-        Div(
-            H1("Social Media Poster"),
-            Div(
+    return (
+        Title("Social Media Poster"),
+        Container(
+            Section(H1("Social Media Poster"), id="header"),
+            Section(
                 H2("Your Connected Accounts"),
                 render_connected_accounts(active_accounts),
-                H2("Connect a New Account"),
-                render_connection_forms(),
                 id="accounts-section"
             ),
-            Div(
+            Section(
+                H2("Connect a New Account"),
+                render_connection_forms(),
+                id="connection-section"
+            ),
+            Section(
                 H2("Post a Message"),
-                render_post_form(active_accounts) if active_accounts else 
-                    P("Please connect at least one social media account to post messages."),
+                render_post_form(active_accounts) if active_accounts else P("Please connect at least one social media account to post messages."),
                 id="post-section"
-            )
+            ),
+            cls="p-6 space-y-6 bg-white dark:bg-gray-800 rounded-lg shadow-md max-w-2xl mx-auto"
         )
     )
 
+# Render connected accounts
 def render_connected_accounts(active_accounts):
-    """Render list of connected accounts with logout buttons"""
     if not active_accounts:
-        return P("No connected accounts yet.")
-    
-    account_divs = []
-    for account in active_accounts:
-        account_divs.append(
-            Card(
-                Div(
-                    H3(f"{account.network.capitalize()}: {account.username}"),
-                    Button("Logout", 
-                        hx_post=f"/logout/{account.id}", 
-                        hx_target="#accounts-section",
-                        hx_swap="outerHTML",
-                        cls="outline"
-                    )
-                )
-            )
-        )
-    
-    return Grid(*account_divs)
+        return P("No connected accounts yet.", cls="text-muted")
+    account_divs = [
+        Card(
+            CardHeader(DivLAligned(UkIcon(account.network), H3(f"{account.network.capitalize()}: {account.username}"))),
+            CardFooter(
+                Button(UkIcon('log-out'), "Logout", hx_post=f"/logout/{account.id}", hx_target="#accounts-section", hx_swap="outerHTML", cls=ButtonT.secondary)
+            ),
+            cls=CardT.hover
+        ) for account in active_accounts
+    ]
+    return Grid(*account_divs, cls="grid-cols-1 md:grid-cols-2 gap-4")
 
+# Render connection forms
 def render_connection_forms():
-    """Render forms for connecting to social networks"""
-    # Check which networks the user is already connected to
     active_accounts = list(accounts())
     connected_networks = [account.network for account in active_accounts]
-    
     connection_cards = []
     
-    # Bluesky connection form
     if "bluesky" not in connected_networks:
         connection_cards.append(
             Card(
-                H3("Bluesky"),
-                P("Connect using your handle and an app password."),
-                P(A("Create an App Password", href="https://bsky.app/settings/app-passwords", target="_blank"), 
-                " before logging in."),
-                Form(
-                    Input(id="bsky-handle", name="handle", placeholder="Your Bluesky handle"),
-                    Input(id="bsky-password", name="password", type="password", placeholder="App Password"),
-                    Button("Connect", type="submit"),
-                    hx_post="/login/bluesky",
-                    hx_target="#accounts-section",
-                    hx_swap="outerHTML"
-                )
+                CardHeader(DivLAligned(UkIcon('bluesky'), H3("Bluesky"))),
+                CardBody(
+                    P("Connect using your handle and an app password."),
+                    P(A("Create an App Password", href="https://bsky.app/settings/app-passwords", target="_blank"), " before logging in."),
+                    Form(
+                        FormLabel("Handle"),
+                        Input(id="bsky-handle", name="handle", placeholder="Your Bluesky handle", cls="w-full"),
+                        FormLabel("App Password"),
+                        Input(id="bsky-password", name="password", type="password", placeholder="App Password", cls="w-full"),
+                        Button("Connect", type="submit", cls=ButtonT.primary),
+                        hx_post="/login/bluesky",
+                        hx_target="#accounts-section",
+                        hx_swap="outerHTML",
+                        cls="space-y-2"
+                    )
+                ),
+                cls=CardT.default
             )
         )
     
-    # Twitter/X connection form
     if "twitter" not in connected_networks:
         connection_cards.append(
             Card(
-                H3("Twitter/X"),
-                P("Connect using browser login."),
-                P("This will open a browser window. Please login and then wait for the browser to close automatically."),
-                Button("Connect with Twitter", 
-                    hx_post="/login/twitter",
-                    hx_target="#accounts-section",
-                    hx_swap="outerHTML"
-                )
+                CardHeader(DivLAligned(UkIcon('twitter'), H3("Twitter/X"))),
+                CardBody(
+                    P("Connect using browser login."),
+                    P("This will open a browser window. Please login and then wait for the browser to close."),
+                    Button("Connect with Twitter", hx_post="/login/twitter", hx_target="#accounts-section", hx_swap="outerHTML", cls=ButtonT.primary)
+                ),
+                cls=CardT.default
             )
         )
     
-    # Mastodon connection form
     if "mastodon" not in connected_networks:
         connection_cards.append(
             Card(
-                H3("Mastodon"),
-                P("Connect to your Mastodon instance."),
-                Form(
-                    Input(id="mastodon-instance", name="instance", placeholder="yourdomain.social"),
-                    Button("Connect", type="submit"),
-                    action="/login/mastodon",
-                    method="post"
+                CardHeader(DivLAligned(UkIcon('mastodon'), H3("Mastodon"))),
+                CardBody(
+                    P("Connect to your Mastodon instance."),
+                    Form(
+                        FormLabel("Instance"),
+                        Input(id="mastodon-instance", name="instance", placeholder="yourdomain.social", cls="w-full"),
+                        Button("Connect", type="submit", cls=ButtonT.primary),
+                        action="/login/mastodon",
+                        method="post",
+                        cls="space-y-2"
+                    ),
+                    P("Enter your instance domain without https://", cls="text-muted")
                 ),
-                footer=P("Enter your instance domain without https://")
+                cls=CardT.default
             )
         )
     
-    # If no connection forms to show, display a message
-    if not connection_cards:
-        return P("You're connected to all available social networks.")
-    
-    return Grid(*connection_cards)
+    return Grid(*connection_cards, cls="grid-cols-1 md:grid-cols-3 gap-4") if connection_cards else P("You're connected to all available networks.", cls="text-muted")
 
+# Render post form
 def render_post_form(active_accounts):
-    """Render form for posting to selected networks"""
-    account_checkboxes = []
-    for account in active_accounts:
-        account_checkboxes.append(
-            CheckboxX(
-                id=f"account_id", 
-                name="account_id",
-                value=str(account.id),
-                checked=True, 
-                label=f"{account.network.capitalize()}: {account.username}"
-            )
-        )
+    # Labeled checkboxes for each connected account
+    account_checkboxes = [
+        LabelCheckboxX(
+            id=f"account_{account.id}",
+            name="account_id",
+            value=str(account.id),
+            checked=True,
+            label=f"{account.network.capitalize()}: {account.username}"
+        ) for account in active_accounts
+    ]
     
-    return Form(
-        Group(*account_checkboxes) if account_checkboxes else None,
-        Textarea(id="post-content", name="content", placeholder="What's on your mind?", rows=5),
-        Button("Post", type="submit"),
-        Div(id="post-result"),
+    for account in active_accounts:
+        print(account.network.capitalize())
+    # Form for posting a message
+    form = Form(
+        Group(*account_checkboxes, cls="flex flex-wrap gap-4"),
+        Textarea(
+            id="post-content",
+            name="content",
+            placeholder="What's on your mind?",
+            rows=5,
+            cls="w-full p-3 border border-gray-600 rounded-md bg-gray-800 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        ),
+        Button(
+            UkIcon('send', cls="mr-2"),
+            "Post",
+            type="submit",
+            cls="mt-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-500 transition-colors"
+        ),
+        Div(id="post-result", cls="mt-4"),
         hx_post="/post",
         hx_target="#post-result",
-        hx_swap="innerHTML"
+        hx_swap="innerHTML",
+        cls="space-y-4"
+    )
+    
+    # Wrap in a card
+    return Card(
+        CardBody(form),
+        cls="bg-gray-800 border border-gray-700 rounded-lg shadow-md"
     )
 
-# Login handlers for each platform
+# Login handlers
 @rt("/login/bluesky")
 def post(handle: str, password: str):
-    """Handle Bluesky login with atproto library"""
     try:
-        # Login to Bluesky to verify credentials
         client = AtprotoClient()
         profile = client.login(handle, password)
-        
-        # Store credentials (just username and password)
-        credentials = {
-            "handle": handle,
-            "password": password
-        }
-        
-        # Save to database
-        accounts.insert(Account(
-            network="bluesky",
-            username=handle,
-            credentials=json.dumps(credentials),
-            created_at=datetime.now().isoformat(),
-            updated_at=datetime.now().isoformat()
-        ))
-        
-        # Return updated accounts section
+        credentials = {"handle": handle, "password": password}
+        accounts.insert(Account(network="bluesky", username=handle, credentials=json.dumps(credentials), created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat()))
         return render_updated_accounts_section()
     except Exception as e:
-        return Div(
-            H2("Your Connected Accounts"),
-            render_connected_accounts(list(accounts())),
-            H2("Connect a New Account"),
-            render_connection_forms(),
-            P(f"Error connecting to Bluesky: {str(e)}", cls="error"),
-            id="accounts-section"
-        )
-
+        return render_updated_accounts_section_with_error(f"Error connecting to Bluesky: {str(e)}")
 
 @rt("/login/twitter")
 def post():
-    """Handle Twitter login with Selenium"""
     try:
-        # Launch browser for Twitter login with visible window
         driver = webdriver.Chrome()
         driver.get("https://twitter.com/i/flow/login")
-        
-        # Wait for user to complete login (up to 5 minutes)
-        WebDriverWait(driver, 300).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='primaryColumn']"))
-        )
-        
-        # Get cookies and user info
+        WebDriverWait(driver, 300).until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='primaryColumn']")))
         cookies = driver.get_cookies()
-        
-        # Try to extract username
         try:
-            # Attempt to navigate to profile page
             driver.get("https://twitter.com/home")
-            time.sleep(2)  # Wait for navigation
-            
-            # Click on profile icon to see username
-            profile_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='AppTabBar_Profile_Link']"))
-            )
+            time.sleep(2)
+            profile_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='AppTabBar_Profile_Link']")))
             profile_button.click()
-            
-            # Extract username from URL
-            time.sleep(2)  # Wait for navigation
-            current_url = driver.current_url
-            username = current_url.split("/")[-1]
+            time.sleep(2)
+            username = driver.current_url.split("/")[-1]
         except:
-            # Fallback username if extraction fails
             username = "twitter_user"
-        
-        # Close browser
         driver.quit()
-        
-        # Save to database
-        accounts.insert(Account(
-            network="twitter",
-            username=username,
-            credentials=json.dumps({"cookies": cookies}),
-            created_at=datetime.now().isoformat(),
-            updated_at=datetime.now().isoformat()
-        ))
-        
-        # Return updated accounts section
+        accounts.insert(Account(network="twitter", username=username, credentials=json.dumps({"cookies": cookies}), created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat()))
         return render_updated_accounts_section()
     except Exception as e:
-        return Div(
-            H2("Your Connected Accounts"),
-            render_connected_accounts(list(accounts())),
-            H2("Connect a New Account"),
-            render_connection_forms(),
-            P(f"Error connecting to Twitter: {str(e)}", cls="error"),
-            id="accounts-section"
-        )
+        return render_updated_accounts_section_with_error(f"Error connecting to Twitter: {str(e)}")
 
 @rt("/login/mastodon")
 def post(instance: str, sess):
-    """Initiate Mastodon OAuth flow"""
     try:
-        # Save instance to session for callback
         sess["mastodon_instance"] = instance
-        
-        # First, register the application with the Mastodon instance
         app_url = f"https://{instance}/api/v1/apps"
-        app_data = {
-            "client_name": "Open Social Poster",
-            "redirect_uris": MASTODON_REDIRECT_URI,
-            "scopes": "write:statuses read",
-            "website": "https://github.com/andreasthinks/open-social-poster"
-        }
-        
+        app_data = {"client_name": "Social Media Poster", "redirect_uris": MASTODON_REDIRECT_URI, "scopes": "write:statuses read"}
         app_response = requests.post(app_url, data=app_data)
         if app_response.status_code != 200:
             raise Exception(f"Failed to register app: {app_response.text}")
-        
         app_info = app_response.json()
-        
-        # Store client credentials in session for the callback
         sess["mastodon_client_id"] = app_info["client_id"]
         sess["mastodon_client_secret"] = app_info["client_secret"]
-        
-        # Redirect to authorization page
-        auth_url = qp(f"https://{instance}/oauth/authorize", 
-            redirect_uri=MASTODON_REDIRECT_URI,
-            client_id=app_info["client_id"],
-            scope="write:statuses read",
-            response_type="code"
-        )
-        
-        # Simple redirect to the authorization page
-        # The user will be redirected back to our callback URL after authorization
+        auth_url = qp(f"https://{instance}/oauth/authorize", redirect_uri=MASTODON_REDIRECT_URI, client_id=app_info["client_id"], scope="write:statuses read", response_type="code")
         return RedirectResponse(auth_url, status_code=303)
     except Exception as e:
-        return Div(
-            H2("Your Connected Accounts"),
-            render_connected_accounts(list(accounts())),
-            H2("Connect a New Account"),
-            render_connection_forms(),
-            P(f"Error connecting to Mastodon: {str(e)}", cls="error"),
-            id="accounts-section"
-        )
+        return render_updated_accounts_section_with_error(f"Error connecting to Mastodon: {str(e)}")
 
 @rt("/login/mastodon/callback")
 def get(code: str, sess):
-    """Handle Mastodon OAuth callback"""
-    # This route is called when the user is redirected back from the Mastodon authorization page
     try:
-        # Process the authorization code and save credentials
         process_mastodon_code(code, sess)
-        
-        # Redirect to the main page
         return RedirectResponse("/", status_code=303)
     except Exception as e:
-        return Titled("Error", 
-                     Container(
-                         H1("Mastodon Login Error"),
-                         P(f"Failed to authenticate with Mastodon: {str(e)}"),
-                         A("Return to Home", href="/")
-                     ))
+        return Titled("Error", Container(H1("Mastodon Login Error"), P(f"Failed to authenticate: {str(e)}"), A("Return to Home", href="/"), cls="p-6"))
 
-# Helper function to process Mastodon authorization code
 def process_mastodon_code(code: str, sess):
-    """Process Mastodon authorization code and save credentials"""
-    try:
-        instance = sess.get("mastodon_instance")
-        client_id = sess.get("mastodon_client_id")
-        client_secret = sess.get("mastodon_client_secret")
-        
-        if not instance or not client_id or not client_secret:
-            raise ValueError("Mastodon credentials not found in session")
-        
-        # Exchange code for access token
-        token_url = f"https://{instance}/oauth/token"
-        token_data = {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "code": code,
-            "redirect_uri": MASTODON_REDIRECT_URI,
-            "grant_type": "authorization_code"
-        }
-        
-        token_response = requests.post(token_url, data=token_data)
-        token_info = token_response.json()
-        
-        # Get user information
-        headers = {"Authorization": f"Bearer {token_info['access_token']}"}
-        user_url = f"https://{instance}/api/v1/accounts/verify_credentials"
-        user_response = requests.get(user_url, headers=headers)
-        user_info = user_response.json()
-        
-        # Save credentials
-        credentials = {
-            "instance": instance,
-            "access_token": token_info["access_token"],
-            "token_type": token_info.get("token_type"),
-            "scope": token_info.get("scope"),
-            "created_at": token_info.get("created_at"),
-            "expires_in": token_info.get("expires_in"),
-            "refresh_token": token_info.get("refresh_token")
-        }
-        
-        # Save to database
-        accounts.insert(Account(
-            network="mastodon",
-            username=f"{user_info['username']}@{instance}",
-            credentials=json.dumps(credentials),
-            created_at=datetime.now().isoformat(),
-            updated_at=datetime.now().isoformat()
-        ))
-        
-        # Return updated accounts section
-        return render_updated_accounts_section()
-    except Exception as e:
-        return Div(
-            H2("Your Connected Accounts"),
-            render_connected_accounts(list(accounts())),
-            H2("Connect a New Account"),
-            render_connection_forms(),
-            P(f"Error connecting to Mastodon: {str(e)}", cls="error"),
-            id="accounts-section"
-        )
+    instance = sess.get("mastodon_instance")
+    client_id = sess.get("mastodon_client_id")
+    client_secret = sess.get("mastodon_client_secret")
+    token_url = f"https://{instance}/oauth/token"
+    token_data = {"client_id": client_id, "client_secret": client_secret, "code": code, "redirect_uri": MASTODON_REDIRECT_URI, "grant_type": "authorization_code"}
+    token_response = requests.post(token_url, data=token_data)
+    token_info = token_response.json()
+    headers = {"Authorization": f"Bearer {token_info['access_token']}"}
+    user_url = f"https://{instance}/api/v1/accounts/verify_credentials"
+    user_response = requests.get(user_url, headers=headers)
+    user_info = user_response.json()
+    credentials = {"instance": instance, "access_token": token_info["access_token"]}
+    accounts.insert(Account(network="mastodon", username=f"{user_info['username']}@{instance}", credentials=json.dumps(credentials), created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat()))
 
 # Logout handler
 @rt("/logout/{id}")
 def post(id: int):
-    """Handle logout for a social network account"""
-    try:
-        # Remove account from database
-        accounts.delete(id)
-        
-        # Return updated accounts section
-        return render_updated_accounts_section()
-    except Exception as e:
-        return Div(
-            H2("Your Connected Accounts"),
-            render_connected_accounts(list(accounts())),
-            H2("Connect a New Account"),
-            render_connection_forms(),
-            P(f"Error logging out: {str(e)}", cls="error"),
-            id="accounts-section"
-        )
+    accounts.delete(id)
+    return render_updated_accounts_section()
 
+# Helper to render accounts section with error
 def render_updated_accounts_section():
-    """Helper to render the updated accounts section after changes"""
     active_accounts = list(accounts())
-    return Div(
-        H2("Your Connected Accounts"),
-        render_connected_accounts(active_accounts),
-        H2("Connect a New Account"),
-        render_connection_forms(),
-        id="accounts-section"
-    )
+    return Div(H2("Your Connected Accounts"), render_connected_accounts(active_accounts), H2("Connect a New Account"), render_connection_forms(), id="accounts-section")
 
-# Posting handler
+def render_updated_accounts_section_with_error(error_msg):
+    active_accounts = list(accounts())
+    return Div(H2("Your Connected Accounts"), render_connected_accounts(active_accounts), H2("Connect a New Account"), render_connection_forms(), Alert(error_msg, cls=AlertT.error), id="accounts-section")
+
+# Post handler
 @rt("/post")
 def post(content: str, account_id: list[str] = None):
-    """Post message to selected platforms"""
-    print(account_id)
-    print(type(account_id))
     if not content.strip():
-        return Div(
-            P("Please enter some content to post.", cls="error")
-        )
-
-    if account_id is None:
-        account_id = []
+        return Alert("Please enter some content to post.", cls=AlertT.error)
+    if not account_id:
+        return Alert("Please select at least one account to post to.", cls=AlertT.error)
     
-    # Convert valid account IDs to integers
-    selected_account_ids = []
-    for id_str in account_id:
-        try:
-            selected_account_ids.append(int(id_str))
-        except (ValueError, TypeError):
-            # Skip invalid IDs
-            continue
-    
-    # Get account objects
-    selected_accounts = []
-    for account_id in selected_account_ids:
-        try:
-            account = accounts[account_id]
-            selected_accounts.append(account)
-        except:
-            pass
-    
-    if not selected_accounts:
-        return Div(
-            P("Please select at least one account to post to.", cls="error")
-        )
-    
-    # Post to each selected platform
+    selected_accounts = [accounts[int(id)] for id in account_id if id.isdigit() and int(id) in accounts]
     results = []
     for account in selected_accounts:
         try:
@@ -477,138 +292,68 @@ def post(content: str, account_id: list[str] = None):
             else:
                 result = f"Unknown network: {account.network}"
                 success = False
-            
             results.append((account, success, result))
         except Exception as e:
             results.append((account, False, str(e)))
     
-    # Display results
-    result_items = []
-    for account, success, message in results:
-        result_items.append(
-            Card(
-                H4(f"{account.network.capitalize()}: {account.username}"),
-                P(message if not success else "Posted successfully!"),
-                cls=f"{'success' if success else 'error'}"
-            )
-        )
-    
+    # Alerts for post results
+    result_items = [
+        Alert(
+            H4(f"{account.network.capitalize()}: {account.username}"),
+            P(message if not success else "Posted successfully!"),
+            cls=AlertT.success if success else AlertT.error
+        ) for account, success, message in results
+    ]
     return Div(
         H3("Post Results"),
-        Grid(*result_items),
-        Button("Clear", 
-               hx_post="/clear-results", 
-               hx_target="#post-result", 
-               hx_swap="innerHTML")
+        *result_items,
+        Button("Clear", hx_post="/clear-results", hx_target="#post-result", hx_swap="innerHTML"),
+        cls="space-y-2"
     )
 
 @rt("/clear-results")
 def post():
-    """Clear post results"""
     return ""
 
-# Platform-specific posting functions
+# Platform-specific posting functions (unchanged)
 def post_to_bluesky(account, content):
-    """Post content to Bluesky"""
     credentials = json.loads(account.credentials)
-    
-    # Get handle and password from credentials
-    handle = credentials.get("handle")
-    password = credentials.get("password")
-    
-    # Create client and login with handle and password
     client = AtprotoClient()
-    client.login(handle, password)
-    
-    # Send post
+    client.login(credentials["handle"], credentials["password"])
     post = client.send_post(text=content)
     return f"Posted to Bluesky: {post.uri}"
 
 def post_to_twitter(account, content):
-    """Post content to Twitter/X using Selenium"""
     credentials = json.loads(account.credentials)
     cookies = credentials.get("cookies", [])
-    
-    # Set up Selenium in headless mode for posting
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080")
     driver = webdriver.Chrome(options=options)
     driver.get("https://twitter.com")
-    
-    # Add saved cookies
     for cookie in cookies:
         if 'expiry' in cookie:
             del cookie['expiry']
         driver.add_cookie(cookie)
-    
-    # Navigate to home page and refresh to apply cookies
     driver.get("https://twitter.com/home")
-    
-    # Find and click the tweet button
     try:
-        # Look for the tweet compose area
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='tweetTextarea_0']"))
-        )
-        
-        # Enter tweet text
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='tweetTextarea_0']")))
         post_area = driver.find_element(By.CSS_SELECTOR, "[data-testid='tweetTextarea_0']")
         post_area.send_keys(content)
-        
-        # Find and click the tweet button - try multiple approaches
-        try:
-            # First try the data-testid approach
-            tweet_button = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='tweetButton']"))
-            )
-            tweet_button.click()
-        except:
-            # If that fails, look for a button containing the text "Post"
-            tweet_button = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, "//span[text()='Post']/ancestor::button"))
-            )
-            tweet_button.click()
-        
-        # Wait for the tweet to be posted
-        time.sleep(5)  # Simple wait for tweet to post
-        
+        tweet_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Post']/ancestor::button")))
+        tweet_button.click()
+        time.sleep(5)
     finally:
-        # Always close the browser
         driver.quit()
-    
     return "Posted to Twitter successfully"
 
 def post_to_mastodon(account, content):
-    """Post content to Mastodon"""
     credentials = json.loads(account.credentials)
-    
-    instance = credentials.get("instance")
-    access_token = credentials.get("access_token")
-    
-    # Create post
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-    
-    data = {
-        "status": content,
-        "visibility": "public"  # or "unlisted", "private", "direct"
-    }
-    
-    response = requests.post(
-        f"https://{instance}/api/v1/statuses",
-        headers=headers,
-        json=data
-    )
-    
+    headers = {"Authorization": f"Bearer {credentials['access_token']}", "Content-Type": "application/json"}
+    data = {"status": content, "visibility": "public"}
+    response = requests.post(f"https://{credentials['instance']}/api/v1/statuses", headers=headers, json=data)
     if response.status_code not in (200, 201, 202):
-        raise Exception(f"Failed to post to Mastodon: {response.text}")
-    
+        raise Exception(f"Failed to post: {response.text}")
     return f"Posted to Mastodon: {response.json().get('url', 'Success!')}"
 
-# Start the server
 if __name__ == "__main__":
     serve()
