@@ -1,5 +1,5 @@
 from fasthtml.common import *
-from monsterui.all import *  # Import MonsterUI components
+from monsterui.all import *
 import os
 import json
 import time
@@ -16,6 +16,7 @@ app, rt = fast_app(hdrs=Theme.blue.headers(daisy=True))
 
 # SQLite database setup
 db = database("social_poster.db")
+
 @dataclass
 class Account:
     id: int = None
@@ -29,32 +30,50 @@ accounts = db.create(Account, pk="id")
 # Mastodon OAuth configuration
 MASTODON_REDIRECT_URI = "http://localhost:5001/login/mastodon/callback"
 
-# Main route
+# Main route with tabs
 @rt("/")
 def get():
     active_accounts = list(accounts())
+    has_accounts = bool(active_accounts)
+    tabs = TabContainer(
+        Li(A("Accounts"), cls='uk-active' if not has_accounts else ''),
+        Li(A("Post"), cls='uk-active' if has_accounts else ''),
+        uk_switcher='connect: #tab-content; animation: uk-animation-fade',
+        alt=True
+    )
+    content = Ul(id="tab-content", cls="uk-switcher")(
+        Li(render_accounts_tab(active_accounts)),
+        Li(render_post_tab(active_accounts))
+    )
     return (
-        Title("Social Media Poster"),
+        Title("Open Social Poster"),
         Container(
-            Section(H1("Social Media Poster"), id="header"),
-            Section(
-                H2("Your Connected Accounts"),
-                render_connected_accounts(active_accounts),
-                id="accounts-section"
-            ),
-            Section(
-                H2("Connect a New Account"),
-                render_connection_forms(),
-                id="connection-section"
-            ),
-            Section(
-                H2("Post a Message"),
-                render_post_form(active_accounts) if active_accounts else P("Please connect at least one social media account to post messages."),
-                id="post-section"
-            ),
+            Section(H1("Open Social Poster"), id="header"),
+            tabs,
+            content,
             cls="p-6 space-y-6 bg-white dark:bg-gray-800 rounded-lg shadow-md max-w-2xl mx-auto"
         )
     )
+
+# Render accounts tab content
+def render_accounts_tab(active_accounts):
+    return Div(
+        H2("Your Connected Accounts"),
+        render_connected_accounts(active_accounts),
+        H2("Connect a New Account"),
+        render_connection_forms(),
+        id="accounts-content"
+    )
+
+# Render post tab content
+def render_post_tab(active_accounts):
+    if not active_accounts:
+        return Div(P("Please connect at least one social media account to post messages."), id="post-content")
+    else:
+        return Div(
+            render_post_form(active_accounts),
+            id="post-content"
+        )
 
 # Render connected accounts
 def render_connected_accounts(active_accounts):
@@ -64,7 +83,7 @@ def render_connected_accounts(active_accounts):
         Card(
             CardHeader(DivLAligned(UkIcon(account.network), H3(f"{account.network.capitalize()}: {account.username}"))),
             CardFooter(
-                Button(UkIcon('log-out'), "Logout", hx_post=f"/logout/{account.id}", hx_target="#accounts-section", hx_swap="outerHTML", cls=ButtonT.secondary)
+                Button(UkIcon('log-out'), "Logout", hx_post=f"/logout/{account.id}", hx_target="#accounts-content", hx_swap="outerHTML", cls=ButtonT.secondary)
             ),
             cls=CardT.hover
         ) for account in active_accounts
@@ -91,7 +110,7 @@ def render_connection_forms():
                         Input(id="bsky-password", name="password", type="password", placeholder="App Password", cls="w-full"),
                         Button("Connect", type="submit", cls=ButtonT.primary),
                         hx_post="/login/bluesky",
-                        hx_target="#accounts-section",
+                        hx_target="#accounts-content",
                         hx_swap="outerHTML",
                         cls="space-y-2"
                     )
@@ -107,7 +126,7 @@ def render_connection_forms():
                 CardBody(
                     P("Connect using browser login."),
                     P("This will open a browser window. Please login and then wait for the browser to close."),
-                    Button("Connect with Twitter", hx_post="/login/twitter", hx_target="#accounts-section", hx_swap="outerHTML", cls=ButtonT.primary)
+                    Button("Connect with Twitter", hx_post="/login/twitter", hx_target="#accounts-content", hx_swap="outerHTML", cls=ButtonT.primary)
                 ),
                 cls=CardT.default
             )
@@ -135,8 +154,8 @@ def render_connection_forms():
     
     return Grid(*connection_cards, cls="grid-cols-1 md:grid-cols-3 gap-4") if connection_cards else P("You're connected to all available networks.", cls="text-muted")
 
+# Render post form with progress indicator
 def render_post_form(active_accounts):
-    # Generate checkboxes for each active account
     account_checkboxes = [
         LabelCheckboxX(
             id=f"account_{account.id}",
@@ -147,45 +166,42 @@ def render_post_form(active_accounts):
         ) for account in active_accounts
     ]
     
-    # Create the form with improved layout and styling
+    loading = Loading(cls=LoadingT.spinner, htmx_indicator=True, id="post-loading")
+    
     form = Form(
-        # Checkbox section with a clear header
         Div(
             P("Select accounts to post to:", cls="text-white mb-2"),
             Group(*account_checkboxes, cls="flex flex-wrap gap-4"),
             cls="mb-4"
         ),
-        # Label for the textarea
         FormLabel("Post Content", fr="post-content", cls="text-white mt-4"),
-        # Improved textarea styling
         Textarea(
             id="post-content",
             name="content",
             placeholder="What's on your mind?",
-            rows=8,  # Increased from 5 to 8 for more space
+            rows=8,
             cls="w-full p-4 border border-gray-500 rounded-lg bg-gray-700 text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400",
             hx_trigger="keyup changed delay:500ms",
             hx_get="/check_length",
             hx_target="#char-warning"
         ),
-        # Character limit warning area
         Div(id="char-warning", cls="text-sm text-red-500 mt-2"),
-        # Submit button
+        Div(loading, cls="mt-2"),
         Button(
             UkIcon('send', cls="mr-2"),
             "Post",
             type="submit",
             cls="mt-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-500 transition-colors"
         ),
-        # Result display area
         Div(id="post-result", cls="mt-4"),
         hx_post="/post",
         hx_target="#post-result",
         hx_swap="innerHTML",
+        hx_indicator="#post-loading",
+        hx_disabled_elt="find button",
         cls="space-y-4"
     )
     
-    # Wrap everything in a styled card
     return Card(
         CardBody(form),
         cls="bg-gray-800 border border-gray-700 rounded-lg shadow-md"
@@ -200,31 +216,27 @@ CHAR_LIMITS = {
 @rt("/check_length")
 def get(content: str, account_id: list[str] = None):
     if not content.strip():
-        return ""  # No content to check yet
+        return ""
     
-    # If no account_ids are provided, use all active accounts as a fallback
     if not account_id:
         active_accounts = list(accounts())
         if not active_accounts:
             return "Warning: No accounts connected to check length against."
     else:
-        # Fetch selected accounts from the database based on provided IDs
         active_accounts = [accounts[int(id)] for id in account_id if id.isdigit() and int(id) in accounts]
         if not active_accounts:
             return "Warning: No valid accounts selected to check length against."
     
-    # Determine the strictest character limit among selected networks
     selected_networks = [account.network for account in active_accounts if account.network in CHAR_LIMITS]
     if not selected_networks:
-        return ""  # No valid networks to check against
+        return ""
     
     max_len = min(CHAR_LIMITS[network] for network in selected_networks)
     
-    # Check if the content exceeds the minimum limit
     if len(content) > max_len:
         return f"Warning: Your message ({len(content)} characters) exceeds the {max_len}-character limit for selected networks."
     
-    return ""  # Content is within limits
+    return ""
 
 # Login handlers
 @rt("/login/bluesky")
@@ -234,9 +246,9 @@ def post(handle: str, password: str):
         profile = client.login(handle, password)
         credentials = {"handle": handle, "password": password}
         accounts.insert(Account(network="bluesky", username=handle, credentials=json.dumps(credentials), created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat()))
-        return render_updated_accounts_section()
+        return render_updated_accounts_tab()
     except Exception as e:
-        return render_updated_accounts_section_with_error(f"Error connecting to Bluesky: {str(e)}")
+        return render_updated_accounts_tab_with_error(f"Error connecting to Bluesky: {str(e)}")
 
 @rt("/login/twitter")
 def post():
@@ -256,16 +268,16 @@ def post():
             username = "twitter_user"
         driver.quit()
         accounts.insert(Account(network="twitter", username=username, credentials=json.dumps({"cookies": cookies}), created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat()))
-        return render_updated_accounts_section()
+        return render_updated_accounts_tab()
     except Exception as e:
-        return render_updated_accounts_section_with_error(f"Error connecting to Twitter: {str(e)}")
+        return render_updated_accounts_tab_with_error(f"Error connecting to Twitter: {str(e)}")
 
 @rt("/login/mastodon")
 def post(instance: str, sess):
     try:
         sess["mastodon_instance"] = instance
         app_url = f"https://{instance}/api/v1/apps"
-        app_data = {"client_name": "Social Media Poster", "redirect_uris": MASTODON_REDIRECT_URI, "scopes": "write:statuses read"}
+        app_data = {"client_name": "Open Social Poster", "redirect_uris": MASTODON_REDIRECT_URI, "scopes": "write:statuses read"}
         app_response = requests.post(app_url, data=app_data)
         if app_response.status_code != 200:
             raise Exception(f"Failed to register app: {app_response.text}")
@@ -275,7 +287,7 @@ def post(instance: str, sess):
         auth_url = qp(f"https://{instance}/oauth/authorize", redirect_uri=MASTODON_REDIRECT_URI, client_id=app_info["client_id"], scope="write:statuses read", response_type="code")
         return RedirectResponse(auth_url, status_code=303)
     except Exception as e:
-        return render_updated_accounts_section_with_error(f"Error connecting to Mastodon: {str(e)}")
+        return render_updated_accounts_tab_with_error(f"Error connecting to Mastodon: {str(e)}")
 
 @rt("/login/mastodon/callback")
 def get(code: str, sess):
@@ -304,16 +316,29 @@ def process_mastodon_code(code: str, sess):
 @rt("/logout/{id}")
 def post(id: int):
     accounts.delete(id)
-    return render_updated_accounts_section()
+    return render_updated_accounts_tab()
 
-# Helper to render accounts section with error
-def render_updated_accounts_section():
+# Helper functions for accounts tab updates
+def render_updated_accounts_tab():
     active_accounts = list(accounts())
-    return Div(H2("Your Connected Accounts"), render_connected_accounts(active_accounts), H2("Connect a New Account"), render_connection_forms(), id="accounts-section")
+    return Div(
+        H2("Your Connected Accounts"),
+        render_connected_accounts(active_accounts),
+        H2("Connect a New Account"),
+        render_connection_forms(),
+        id="accounts-content"
+    )
 
-def render_updated_accounts_section_with_error(error_msg):
+def render_updated_accounts_tab_with_error(error_msg):
     active_accounts = list(accounts())
-    return Div(H2("Your Connected Accounts"), render_connected_accounts(active_accounts), H2("Connect a New Account"), render_connection_forms(), Alert(error_msg, cls=AlertT.error), id="accounts-section")
+    return Div(
+        H2("Your Connected Accounts"),
+        render_connected_accounts(active_accounts),
+        H2("Connect a New Account"),
+        render_connection_forms(),
+        Alert(error_msg, cls=AlertT.error),
+        id="accounts-content"
+    )
 
 # Post handler
 @rt("/post")
@@ -332,7 +357,6 @@ def post(content: str, account_id: list[str] = None):
                 cls=AlertT.error
             )
     
-    # Proceed with posting if all checks pass
     results = []
     for account in selected_accounts:
         try:
@@ -365,11 +389,12 @@ def post(content: str, account_id: list[str] = None):
         Button("Clear", hx_post="/clear-results", hx_target="#post-result", hx_swap="innerHTML"),
         cls="space-y-2"
     )
+
 @rt("/clear-results")
 def post():
     return ""
 
-# Platform-specific posting functions (unchanged)
+# Platform-specific posting functions
 def post_to_bluesky(account, content):
     credentials = json.loads(account.credentials)
     client = AtprotoClient()
