@@ -151,7 +151,9 @@ def render_post_form(active_accounts):
     for account in active_accounts:
         account_checkboxes.append(
             CheckboxX(
-                id=f"post_to_{account.id}", 
+                id=f"account_id", 
+                name="account_id",
+                value=str(account.id),
                 checked=True, 
                 label=f"{account.network.capitalize()}: {account.username}"
             )
@@ -172,16 +174,14 @@ def render_post_form(active_accounts):
 def post(handle: str, password: str):
     """Handle Bluesky login with atproto library"""
     try:
-        # Login to Bluesky
+        # Login to Bluesky to verify credentials
         client = AtprotoClient()
         profile = client.login(handle, password)
         
-        # Store credentials
+        # Store credentials (just username and password)
         credentials = {
-            "handle": profile.handle,
-            "did": profile.did,
-            "access_jwt": client.session.access_jwt,
-            "refresh_jwt": client.session.refresh_jwt
+            "handle": handle,
+            "password": password
         }
         
         # Save to database
@@ -204,6 +204,7 @@ def post(handle: str, password: str):
             P(f"Error connecting to Bluesky: {str(e)}", cls="error"),
             id="accounts-section"
         )
+
 
 @rt("/login/twitter")
 def post():
@@ -258,7 +259,7 @@ def post():
     except Exception as e:
         return Div(
             H2("Your Connected Accounts"),
-            render_connected_accounts(list(accounts.all())),
+            render_connected_accounts(list(accounts())),
             H2("Connect a New Account"),
             render_connection_forms(),
             P(f"Error connecting to Twitter: {str(e)}", cls="error"),
@@ -405,7 +406,7 @@ def post(id: int):
     except Exception as e:
         return Div(
             H2("Your Connected Accounts"),
-            render_connected_accounts(list(accounts.all())),
+            render_connected_accounts(list(accounts())),
             H2("Connect a New Account"),
             render_connection_forms(),
             P(f"Error logging out: {str(e)}", cls="error"),
@@ -414,7 +415,7 @@ def post(id: int):
 
 def render_updated_accounts_section():
     """Helper to render the updated accounts section after changes"""
-    active_accounts = list(accounts.all())
+    active_accounts = list(accounts())
     return Div(
         H2("Your Connected Accounts"),
         render_connected_accounts(active_accounts),
@@ -425,19 +426,26 @@ def render_updated_accounts_section():
 
 # Posting handler
 @rt("/post")
-def post(content: str, **kwargs):
+def post(content: str, account_id: list[str] = None):
     """Post message to selected platforms"""
+    print(account_id)
+    print(type(account_id))
     if not content.strip():
         return Div(
             P("Please enter some content to post.", cls="error")
         )
+
+    if account_id is None:
+        account_id = []
     
-    # Determine which accounts to post to
+    # Convert valid account IDs to integers
     selected_account_ids = []
-    for key, value in kwargs.items():
-        if key.startswith("post_to_") and value == "yes":
-            account_id = int(key.replace("post_to_", ""))
-            selected_account_ids.append(account_id)
+    for id_str in account_id:
+        try:
+            selected_account_ids.append(int(id_str))
+        except (ValueError, TypeError):
+            # Skip invalid IDs
+            continue
     
     # Get account objects
     selected_accounts = []
@@ -504,9 +512,13 @@ def post_to_bluesky(account, content):
     """Post content to Bluesky"""
     credentials = json.loads(account.credentials)
     
+    # Get handle and password from credentials
+    handle = credentials.get("handle")
+    password = credentials.get("password")
+    
+    # Create client and login with handle and password
     client = AtprotoClient()
-    # Restore session from saved credentials
-    client.login(credentials.get("handle"), None, credentials.get("access_jwt"), credentials.get("refresh_jwt"))
+    client.login(handle, password)
     
     # Send post
     post = client.send_post(text=content)
