@@ -10,12 +10,17 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import requests
+import os
+
 
 # Setup FastHTML app with MonsterUI's blue theme and DaisyUI
 app, rt = fast_app(hdrs=Theme.blue.headers(daisy=True))
 
-# SQLite database setup
-db = database("social_poster.db")
+
+db_dir = os.path.join(os.path.expanduser("~"), ".social_poster")
+os.makedirs(db_dir, exist_ok=True)
+db_path = os.path.join(db_dir, "social_poster.db")
+db = database(db_path)
 
 @dataclass
 class Account:
@@ -88,7 +93,7 @@ def render_connected_accounts(active_accounts):
             cls=CardT.hover
         ) for account in active_accounts
     ]
-    return Grid(*account_divs, cls="grid-cols-1 md:grid-cols-2 gap-4")
+    return Grid(*account_divs, cols=1)
 
 # Render connection forms
 def render_connection_forms():
