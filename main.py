@@ -135,9 +135,8 @@ def render_connection_forms():
     
     return Grid(*connection_cards, cls="grid-cols-1 md:grid-cols-3 gap-4") if connection_cards else P("You're connected to all available networks.", cls="text-muted")
 
-# Render post form
 def render_post_form(active_accounts):
-    # Labeled checkboxes for each connected account
+    # Generate checkboxes for each active account
     account_checkboxes = [
         LabelCheckboxX(
             id=f"account_{account.id}",
@@ -148,24 +147,37 @@ def render_post_form(active_accounts):
         ) for account in active_accounts
     ]
     
-    for account in active_accounts:
-        print(account.network.capitalize())
-    # Form for posting a message
+    # Create the form with improved layout and styling
     form = Form(
-        Group(*account_checkboxes, cls="flex flex-wrap gap-4"),
+        # Checkbox section with a clear header
+        Div(
+            P("Select accounts to post to:", cls="text-white mb-2"),
+            Group(*account_checkboxes, cls="flex flex-wrap gap-4"),
+            cls="mb-4"
+        ),
+        # Label for the textarea
+        FormLabel("Post Content", fr="post-content", cls="text-white mt-4"),
+        # Improved textarea styling
         Textarea(
             id="post-content",
             name="content",
             placeholder="What's on your mind?",
-            rows=5,
-            cls="w-full p-3 border border-gray-600 rounded-md bg-gray-800 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            rows=8,  # Increased from 5 to 8 for more space
+            cls="w-full p-4 border border-gray-500 rounded-lg bg-gray-700 text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400",
+            hx_trigger="keyup changed delay:500ms",
+            hx_get="/check_length",
+            hx_target="#char-warning"
         ),
+        # Character limit warning area
+        Div(id="char-warning", cls="text-sm text-red-500 mt-2"),
+        # Submit button
         Button(
             UkIcon('send', cls="mr-2"),
             "Post",
             type="submit",
             cls="mt-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-500 transition-colors"
         ),
+        # Result display area
         Div(id="post-result", cls="mt-4"),
         hx_post="/post",
         hx_target="#post-result",
@@ -173,11 +185,46 @@ def render_post_form(active_accounts):
         cls="space-y-4"
     )
     
-    # Wrap in a card
+    # Wrap everything in a styled card
     return Card(
         CardBody(form),
         cls="bg-gray-800 border border-gray-700 rounded-lg shadow-md"
     )
+
+CHAR_LIMITS = {
+    "twitter": 280,
+    "mastodon": 500,
+    "bluesky": 300
+}
+
+@rt("/check_length")
+def get(content: str, account_id: list[str] = None):
+    if not content.strip():
+        return ""  # No content to check yet
+    
+    # If no account_ids are provided, use all active accounts as a fallback
+    if not account_id:
+        active_accounts = list(accounts())
+        if not active_accounts:
+            return "Warning: No accounts connected to check length against."
+    else:
+        # Fetch selected accounts from the database based on provided IDs
+        active_accounts = [accounts[int(id)] for id in account_id if id.isdigit() and int(id) in accounts]
+        if not active_accounts:
+            return "Warning: No valid accounts selected to check length against."
+    
+    # Determine the strictest character limit among selected networks
+    selected_networks = [account.network for account in active_accounts if account.network in CHAR_LIMITS]
+    if not selected_networks:
+        return ""  # No valid networks to check against
+    
+    max_len = min(CHAR_LIMITS[network] for network in selected_networks)
+    
+    # Check if the content exceeds the minimum limit
+    if len(content) > max_len:
+        return f"Warning: Your message ({len(content)} characters) exceeds the {max_len}-character limit for selected networks."
+    
+    return ""  # Content is within limits
 
 # Login handlers
 @rt("/login/bluesky")
@@ -277,6 +324,15 @@ def post(content: str, account_id: list[str] = None):
         return Alert("Please select at least one account to post to.", cls=AlertT.error)
     
     selected_accounts = [accounts[int(id)] for id in account_id if id.isdigit() and int(id) in accounts]
+    for account in selected_accounts:
+        max_len = CHAR_LIMITS.get(account.network, 500)
+        if len(content) > max_len:
+            return Alert(
+                f"Message too long for {account.network.capitalize()} ({len(content)} characters exceeds {max_len}-character limit).",
+                cls=AlertT.error
+            )
+    
+    # Proceed with posting if all checks pass
     results = []
     for account in selected_accounts:
         try:
@@ -296,7 +352,6 @@ def post(content: str, account_id: list[str] = None):
         except Exception as e:
             results.append((account, False, str(e)))
     
-    # Alerts for post results
     result_items = [
         Alert(
             H4(f"{account.network.capitalize()}: {account.username}"),
@@ -310,7 +365,6 @@ def post(content: str, account_id: list[str] = None):
         Button("Clear", hx_post="/clear-results", hx_target="#post-result", hx_swap="innerHTML"),
         cls="space-y-2"
     )
-
 @rt("/clear-results")
 def post():
     return ""
