@@ -157,7 +157,7 @@ def render_connection_forms():
             )
         )
     
-    return Grid(*connection_cards, cls="grid-cols-1 md:grid-cols-3 gap-4") if connection_cards else P("You're connected to all available networks.", cls="text-muted")
+    return Grid(*connection_cards, cols=1) if connection_cards else P("You're connected to all available networks.", cls="text-muted")
 
 # Render post form with progress indicator
 def render_post_form(active_accounts):
