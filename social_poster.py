@@ -525,30 +525,37 @@ def post_to_bluesky(account, content, uploads):
     client = AtprotoClient()
     client.login(credentials["handle"], credentials["password"])
     
-    url_pattern = re.compile(r'https?://[^\s]+')
-    urls = url_pattern.findall(content)
-    facets = []
-    if urls:
-        text = content
-        for url in urls:
-            start = text.index(url)
-            end = start + len(url)
-            facet = models.AppBskyRichtextFacet.Main(
-                features=[models.AppBskyRichtextFacet.Link(uri=url)],
-                index=models.AppBskyRichtextFacet.ByteSlice(byte_start=start, byte_end=end)
-            )
-            facets.append(facet)
+    # Helper function to convert character index to byte offset
+    def char_to_byte_index(s, char_index):
+        return len(s[:char_index].encode('utf-8'))
     
+    # Find all URLs and calculate their byte offsets
+    url_pattern = re.compile(r'https?://[^\s]+')
+    matches = list(url_pattern.finditer(content))
+    facets = []
+    for match in matches:
+        start_char = match.start()
+        end_char = match.end()
+        byte_start = char_to_byte_index(content, start_char)
+        byte_end = char_to_byte_index(content, end_char)
+        url = match.group()
+        facet = models.AppBskyRichtextFacet.Main(
+            features=[models.AppBskyRichtextFacet.Link(uri=url)],
+            index=models.AppBskyRichtextFacet.ByteSlice(byte_start=byte_start, byte_end=byte_end)
+        )
+        facets.append(facet)
+    
+    # Handle image uploads
     images = []
     for upload in uploads:
-        # Extract the BlobRef from the response
         blob_response = client.upload_blob(upload.data)
-        blob_ref = blob_response.blob  # Get the BlobRef object
+        blob_ref = blob_response.blob
         images.append(models.AppBskyEmbedImages.Image(alt="", image=blob_ref))
     
     embed = models.AppBskyEmbedImages.Main(images=images) if images else None
     post = client.send_post(text=content, facets=facets if facets else None, embed=embed)
     return f"Posted to Bluesky: {post.uri}"
+
 
 def post_to_twitter(account, content, uploads):
     """
