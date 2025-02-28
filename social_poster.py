@@ -8,28 +8,27 @@
 #     "selenium",
 # ]
 # ///
+import tempfile
+import shutil
 from fasthtml.common import *
 from monsterui.all import *
 import os
 import json
 import time
 from datetime import datetime
-from atproto import Client as AtprotoClient
+from atproto import Client as AtprotoClient, models
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import requests
-import os
 import re
-from atproto import Client, models
-
 
 # Setup FastHTML app with MonsterUI's blue theme and DaisyUI
 app, rt = fast_app(hdrs=Theme.blue.headers(daisy=True))
 
-
 db_dir = os.path.join(os.path.expanduser("~"), ".social_poster")
+print(db_dir)
 os.makedirs(db_dir, exist_ok=True)
 db_path = os.path.join(db_dir, "social_poster.db")
 db = database(db_path)
@@ -44,10 +43,19 @@ class Account:
     updated_at: str = None
 accounts = db.create(Account, pk="id")
 
+@dataclass
+class Upload:
+    id: int = None
+    filename: str = None
+    content_type: str = None
+    data: bytes = None
+    created_at: str = None
+uploads = db.create(Upload, pk="id")
+
 # Mastodon OAuth configuration
 MASTODON_REDIRECT_URI = "http://localhost:5001/login/mastodon/callback"
 
-# Main route with tabs
+# Main route
 @rt("/")
 def get():
     active_accounts = list(accounts())
@@ -72,7 +80,7 @@ def get():
         )
     )
 
-# Render accounts tab content
+# Accounts tab rendering (unchanged except for function call)
 def render_accounts_tab(active_accounts):
     return Div(
         render_connected_accounts(active_accounts),
@@ -81,17 +89,57 @@ def render_accounts_tab(active_accounts):
         id="accounts-content"
     )
 
-# Render post tab content
+# Post tab rendering with file upload
 def render_post_tab(active_accounts):
     if not active_accounts:
         return Div(P("Please connect at least one social media account to post messages."), id="post-content")
     else:
         return Div(
+            Form(
+                Input(type="file", multiple=True, name="files"),
+                Button("Upload Files", cls=ButtonT.secondary),
+                hx_post="/upload",
+                hx_target="#uploaded-files",
+                hx_swap="outerHTML",
+                cls="mt-4"
+            ),
+            Div(id="uploaded-files"),
             render_post_form(active_accounts),
             id="post-content"
         )
 
-# Render connected accounts
+# Render uploaded files
+def render_uploaded_files():
+    current_uploads = list(uploads())
+    if not current_uploads:
+        return Div(id="uploaded-files")
+    items = [
+        Li(
+            Span(upload.filename),
+            Button(UkIcon('x'), hx_delete=f"/delete_upload/{upload.id}", hx_target="#uploaded-files", hx_swap="outerHTML")
+        ) for upload in current_uploads
+    ]
+    return Ul(*items, id="uploaded-files", cls="mt-2")
+
+# File upload route
+@rt("/upload")
+async def post(files: list[UploadFile]):
+    for file in files:
+        uploads.insert(Upload(
+            filename=file.filename,
+            content_type=file.content_type,
+            data=await file.read(),
+            created_at=datetime.now().isoformat()
+        ))
+    return render_uploaded_files()
+
+# Delete upload route
+@rt("/delete_upload/{id}")
+def delete(id: int):
+    uploads.delete(id)
+    return render_uploaded_files()
+
+# Connected accounts rendering (unchanged)
 def render_connected_accounts(active_accounts):
     if not active_accounts:
         return P("No connected accounts yet.", cls="text-muted")
@@ -104,15 +152,14 @@ def render_connected_accounts(active_accounts):
             cls=CardT.hover
         ) for account in active_accounts
     ]
-    return (H2("Your Connected Accounts"),
-            Grid(*account_divs, cols=1))
+    return (H2("Your Connected Accounts"), Grid(*account_divs, cols=1))
 
-# Render connection forms
+# Connection forms (unchanged)
 def render_connection_forms():
     active_accounts = list(accounts())
     connected_networks = [account.network for account in active_accounts]
     connection_cards = []
-    
+    # Bluesky connection
     if "bluesky" not in connected_networks:
         connection_cards.append(
             Card(
@@ -135,7 +182,7 @@ def render_connection_forms():
                 cls=CardT.default
             )
         )
-    
+    # Twitter connection
     if "twitter" not in connected_networks:
         connection_cards.append(
             Card(
@@ -148,7 +195,7 @@ def render_connection_forms():
                 cls=CardT.default
             )
         )
-    
+    # Mastodon connection
     if "mastodon" not in connected_networks:
         connection_cards.append(
             Card(
@@ -168,10 +215,9 @@ def render_connection_forms():
                 cls=CardT.default
             )
         )
-    
     return Grid(*connection_cards, cols=1) if connection_cards else P("You're connected to all available networks.", cls="text-muted")
 
-# Render post form with progress indicator
+# Post form rendering (unchanged)
 def render_post_form(active_accounts):
     account_checkboxes = [
         LabelCheckboxX(
@@ -182,9 +228,7 @@ def render_post_form(active_accounts):
             label=f"{account.network.capitalize()}: {account.username}"
         ) for account in active_accounts
     ]
-    
     loading = Loading(cls=LoadingT.spinner, htmx_indicator=True, id="post-loading")
-    
     form = Form(
         Div(
             P("Select accounts to post to:", cls="text-white mb-2"),
@@ -218,23 +262,14 @@ def render_post_form(active_accounts):
         hx_disabled_elt="find button",
         cls="space-y-4"
     )
-    
-    return Card(
-        CardBody(form),
-        cls="bg-gray-800 border border-gray-700 rounded-lg shadow-md"
-    )
+    return Card(CardBody(form), cls="bg-gray-800 border border-gray-700 rounded-lg shadow-md")
 
-CHAR_LIMITS = {
-    "twitter": 280,
-    "mastodon": 500,
-    "bluesky": 300
-}
+CHAR_LIMITS = {"twitter": 280, "mastodon": 500, "bluesky": 300}
 
 @rt("/check_length")
 def get(content: str, account_id: list[str] = None):
     if not content.strip():
         return ""
-    
     if not account_id:
         active_accounts = list(accounts())
         if not active_accounts:
@@ -243,19 +278,15 @@ def get(content: str, account_id: list[str] = None):
         active_accounts = [accounts[int(id)] for id in account_id if id.isdigit() and int(id) in accounts]
         if not active_accounts:
             return "Warning: No valid accounts selected to check length against."
-    
     selected_networks = [account.network for account in active_accounts if account.network in CHAR_LIMITS]
     if not selected_networks:
         return ""
-    
     max_len = min(CHAR_LIMITS[network] for network in selected_networks)
-    
     if len(content) > max_len:
         return f"Warning: Your message ({len(content)} characters) exceeds the {max_len}-character limit for selected networks."
-    
     return ""
 
-# Login handlers
+# Login handlers (unchanged)
 @rt("/login/bluesky")
 def post(handle: str, password: str):
     try:
@@ -294,14 +325,14 @@ def post(instance: str, sess):
     try:
         sess["mastodon_instance"] = instance
         app_url = f"https://{instance}/api/v1/apps"
-        app_data = {"client_name": "Open Social Poster", "redirect_uris": MASTODON_REDIRECT_URI, "scopes": "write:statuses read"}
+        app_data = {"client_name": "Open Social Poster", "redirect_uris": MASTODON_REDIRECT_URI, "scopes": "write:statuses write:media read"}
         app_response = requests.post(app_url, data=app_data)
         if app_response.status_code != 200:
             raise Exception(f"Failed to register app: {app_response.text}")
         app_info = app_response.json()
         sess["mastodon_client_id"] = app_info["client_id"]
         sess["mastodon_client_secret"] = app_info["client_secret"]
-        auth_url = qp(f"https://{instance}/oauth/authorize", redirect_uri=MASTODON_REDIRECT_URI, client_id=app_info["client_id"], scope="write:statuses read", response_type="code")
+        auth_url = qp(f"https://{instance}/oauth/authorize", redirect_uri=MASTODON_REDIRECT_URI, client_id=app_info["client_id"], scope="write:statuses write:media read", response_type="code")
         return RedirectResponse(auth_url, status_code=303)
     except Exception as e:
         return render_updated_accounts_tab_with_error(f"Error connecting to Mastodon: {str(e)}")
@@ -329,13 +360,13 @@ def process_mastodon_code(code: str, sess):
     credentials = {"instance": instance, "access_token": token_info["access_token"]}
     accounts.insert(Account(network="mastodon", username=f"{user_info['username']}@{instance}", credentials=json.dumps(credentials), created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat()))
 
-# Logout handler
+# Logout handler (unchanged)
 @rt("/logout/{id}")
 def post(id: int):
     accounts.delete(id)
     return render_updated_accounts_tab()
 
-# Helper functions for accounts tab updates
+# Helper functions for accounts tab updates (unchanged)
 def render_updated_accounts_tab():
     active_accounts = list(accounts())
     return Div(
@@ -357,7 +388,7 @@ def render_updated_accounts_tab_with_error(error_msg):
         id="accounts-content"
     )
 
-# Post handler
+# Post handler with media
 @rt("/post")
 def post(content: str, account_id: list[str] = None):
     if not content.strip():
@@ -366,6 +397,8 @@ def post(content: str, account_id: list[str] = None):
         return Alert("Please select at least one account to post to.", cls=AlertT.error)
     
     selected_accounts = [accounts[int(id)] for id in account_id if id.isdigit() and int(id) in accounts]
+    current_uploads = list(uploads())
+    
     for account in selected_accounts:
         max_len = CHAR_LIMITS.get(account.network, 500)
         if len(content) > max_len:
@@ -378,13 +411,13 @@ def post(content: str, account_id: list[str] = None):
     for account in selected_accounts:
         try:
             if account.network == "bluesky":
-                result = post_to_bluesky(account, content)
+                result = post_to_bluesky(account, content, current_uploads)
                 success = True
             elif account.network == "twitter":
-                result = post_to_twitter(account, content)
-                success = True
+                result = post_to_twitter(account, content, current_uploads)
+                success = False
             elif account.network == "mastodon":
-                result = post_to_mastodon(account, content)
+                result = post_to_mastodon(account, content, current_uploads)
                 success = True
             else:
                 result = f"Unknown network: {account.network}"
@@ -392,6 +425,9 @@ def post(content: str, account_id: list[str] = None):
             results.append((account, success, result))
         except Exception as e:
             results.append((account, False, str(e)))
+    
+    # Clear uploads table after posting
+    db.execute("DELETE FROM upload")
     
     result_items = [
         Alert(
@@ -411,68 +447,140 @@ def post(content: str, account_id: list[str] = None):
 def post():
     return ""
 
-
-def post_to_bluesky(account, content):
+# Posting functions with media
+def post_to_bluesky(account, content, uploads):
     credentials = json.loads(account.credentials)
     client = Client()
     client.login(credentials["handle"], credentials["password"])
     
-    # Regular expression to find URLs in the content
     url_pattern = re.compile(r'https?://[^\s]+')
     urls = url_pattern.findall(content)
-    
+    facets = []
     if urls:
-        # If URLs are found, create facets for rich text formatting
-        facets = []
         text = content
-        
         for url in urls:
             start = text.index(url)
             end = start + len(url)
-            
-            # Create a facet for the URL
             facet = models.AppBskyRichtextFacet.Main(
                 features=[models.AppBskyRichtextFacet.Link(uri=url)],
                 index=models.AppBskyRichtextFacet.ByteSlice(byte_start=start, byte_end=end)
             )
             facets.append(facet)
-        
-        # Post with facets
-        post = client.send_post(text=text, facets=facets)
-    else:
-        # Post without facets if no URLs are present
-        post = client.send_post(text=content)
     
+    images = []
+    for upload in uploads:
+        blob = client.upload_blob(upload.data)
+        images.append(models.AppBskyEmbedImages.Image(alt="", image=blob))
+    
+    embed = models.AppBskyEmbedImages.Main(images=images) if images else None
+    post = client.send_post(text=content, facets=facets if facets else None, embed=embed)
     return f"Posted to Bluesky: {post.uri}"
-
-def post_to_twitter(account, content):
+def post_to_twitter(account, content, uploads):
+    """
+    Posts a tweet with attached files using Selenium to simulate drag-and-drop behavior.
+    
+    Args:
+        account: Account object with credentials (cookies)
+        content: The text content of the tweet
+        uploads: List of Upload objects containing file data and metadata
+    
+    Returns:
+        str: Success message or error description
+    """
+    # Load Twitter cookies from account credentials
     credentials = json.loads(account.credentials)
     cookies = credentials.get("cookies", [])
+    
+    # Set up Selenium WebDriver in headless mode
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
     driver = webdriver.Chrome(options=options)
-    driver.get("https://twitter.com")
-    for cookie in cookies:
-        if 'expiry' in cookie:
-            del cookie['expiry']
-        driver.add_cookie(cookie)
-    driver.get("https://twitter.com/home")
+    
     try:
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='tweetTextarea_0']")))
-        post_area = driver.find_element(By.CSS_SELECTOR, "[data-testid='tweetTextarea_0']")
-        post_area.send_keys(content)
-        tweet_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Post']/ancestor::button")))
+        # Navigate to Twitter and apply cookies
+        driver.get("https://twitter.com")
+        for cookie in cookies:
+            if 'expiry' in cookie:
+                del cookie['expiry']
+            driver.add_cookie(cookie)
+        
+        # Go to the tweet compose page
+        driver.get("https://twitter.com/compose/tweet")
+        
+        # Wait for the compose page to load
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='tweetTextarea_0']"))
+        )
+        
+        # Handle file uploads if any
+        if uploads:
+            # Create a temporary directory to store files
+            temp_dir = tempfile.mkdtemp()
+            file_paths = []
+            
+            # Save each uploaded file to the temporary directory
+            for upload in uploads:
+                file_path = os.path.join(temp_dir, upload.filename)
+                with open(file_path, "wb") as f:
+                    f.write(upload.data)
+                file_paths.append(file_path)
+            
+            # Locate the hidden file input element
+            file_input = driver.find_element(By.CSS_SELECTOR, "input[type='file']")
+            
+            # Send the file paths to the file input element to simulate upload
+            file_input.send_keys("\n".join(file_paths))
+            
+            # Wait for Twitter to process the file uploads
+            time.sleep(5)  # Adjust this delay based on file size and network speed
+            
+            # Clean up temporary files
+            shutil.rmtree(temp_dir)
+        
+        # Locate the tweet text area and enter the content
+        tweet_textarea = driver.find_element(By.CSS_SELECTOR, "[data-testid='tweetTextarea_0']")
+        tweet_textarea.send_keys(content)
+        
+        # Locate and click the "Post" button
+        tweet_button = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.XPATH, "//span[text()='Post']/ancestor::button"))
+        )
         tweet_button.click()
+        
+        # Wait for the tweet to post
         time.sleep(5)
+        
+        return "Posted to Twitter successfully"
+    
+    except Exception as e:
+        return f"Error posting to Twitter: {str(e)}"
+    
     finally:
         driver.quit()
-    return "Posted to Twitter successfully"
 
-def post_to_mastodon(account, content):
+def post_to_mastodon(account, content, uploads):
     credentials = json.loads(account.credentials)
-    headers = {"Authorization": f"Bearer {credentials['access_token']}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {credentials['access_token']}"}
+    
+    media_ids = []
+    for upload in uploads:
+        media_response = requests.post(
+            f"https://{credentials['instance']}/api/v1/media",
+            headers=headers,
+            files={"file": (upload.filename, upload.data, upload.content_type)}
+        )
+        if media_response.status_code != 200:
+            raise Exception(f"Failed to upload media: {media_response.text}")
+        media_ids.append(media_response.json()["id"])
+    
     data = {"status": content, "visibility": "public"}
-    response = requests.post(f"https://{credentials['instance']}/api/v1/statuses", headers=headers, json=data)
+    if media_ids:
+        data["media_ids"] = media_ids
+    response = requests.post(
+        f"https://{credentials['instance']}/api/v1/statuses",
+        headers=headers,
+        json=data
+    )
     if response.status_code not in (200, 201, 202):
         raise Exception(f"Failed to post: {response.text}")
     return f"Posted to Mastodon: {response.json().get('url', 'Success!')}"
