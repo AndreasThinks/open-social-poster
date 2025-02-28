@@ -21,6 +21,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import requests
 import os
+import re
+from atproto import Client, models
 
 
 # Setup FastHTML app with MonsterUI's blue theme and DaisyUI
@@ -409,12 +411,38 @@ def post(content: str, account_id: list[str] = None):
 def post():
     return ""
 
-# Platform-specific posting functions
+
 def post_to_bluesky(account, content):
     credentials = json.loads(account.credentials)
-    client = AtprotoClient()
+    client = Client()
     client.login(credentials["handle"], credentials["password"])
-    post = client.send_post(text=content)
+    
+    # Regular expression to find URLs in the content
+    url_pattern = re.compile(r'https?://[^\s]+')
+    urls = url_pattern.findall(content)
+    
+    if urls:
+        # If URLs are found, create facets for rich text formatting
+        facets = []
+        text = content
+        
+        for url in urls:
+            start = text.index(url)
+            end = start + len(url)
+            
+            # Create a facet for the URL
+            facet = models.AppBskyRichtextFacet.Main(
+                features=[models.AppBskyRichtextFacet.Link(uri=url)],
+                index=models.AppBskyRichtextFacet.ByteSlice(byte_start=start, byte_end=end)
+            )
+            facets.append(facet)
+        
+        # Post with facets
+        post = client.send_post(text=text, facets=facets)
+    else:
+        # Post without facets if no URLs are present
+        post = client.send_post(text=content)
+    
     return f"Posted to Bluesky: {post.uri}"
 
 def post_to_twitter(account, content):
