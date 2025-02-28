@@ -487,7 +487,7 @@ def post(content: str, account_id: list[str] = None):
                 success = True
             elif account.network == "twitter":
                 result = post_to_twitter(account, content, current_uploads)
-                success = False
+                success = result.startswith("Posted")
             elif account.network == "mastodon":
                 result = post_to_mastodon(account, content, current_uploads)
                 success = True
@@ -625,7 +625,7 @@ def post_to_twitter(account, content, uploads):
         # Wait for the tweet to post
         time.sleep(5)
         
-        return "Posted to Twitter successfully"
+        return "Posted successfully!"
     
     except Exception as e:
         return f"Error posting to Twitter: {str(e)}"
