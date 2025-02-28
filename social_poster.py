@@ -511,7 +511,7 @@ def post():
 # Posting functions with media
 def post_to_bluesky(account, content, uploads):
     credentials = json.loads(account.credentials)
-    client = Client()
+    client = AtprotoClient()
     client.login(credentials["handle"], credentials["password"])
     
     url_pattern = re.compile(r'https?://[^\s]+')
@@ -530,12 +530,15 @@ def post_to_bluesky(account, content, uploads):
     
     images = []
     for upload in uploads:
-        blob = client.upload_blob(upload.data)
-        images.append(models.AppBskyEmbedImages.Image(alt="", image=blob))
+        # Extract the BlobRef from the response
+        blob_response = client.upload_blob(upload.data)
+        blob_ref = blob_response.blob  # Get the BlobRef object
+        images.append(models.AppBskyEmbedImages.Image(alt="", image=blob_ref))
     
     embed = models.AppBskyEmbedImages.Main(images=images) if images else None
     post = client.send_post(text=content, facets=facets if facets else None, embed=embed)
     return f"Posted to Bluesky: {post.uri}"
+
 def post_to_twitter(account, content, uploads):
     """
     Posts a tweet with attached files using Selenium to simulate drag-and-drop behavior.
