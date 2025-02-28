@@ -95,31 +95,92 @@ def render_post_tab(active_accounts):
         return Div(P("Please connect at least one social media account to post messages."), id="post-content")
     else:
         return Div(
-            Form(
-                Input(type="file", multiple=True, name="files"),
-                Button("Upload Files", cls=ButtonT.secondary),
-                hx_post="/upload",
-                hx_target="#uploaded-files",
-                hx_swap="outerHTML",
-                cls="mt-4"
+            Card(
+                CardHeader(
+                    DivLAligned(UkIcon('image'), H3("Media Attachments"))
+                ),
+                CardBody(
+                    Form(
+                        Div(
+                            DivCentered(
+                                UkIcon('upload', height=36, width=36, cls="mb-2"),
+                                H4("Drop files here or click to browse"),
+                                Input(
+                                    type="file", 
+                                    multiple=True, 
+                                    name="files", 
+                                    cls="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                ),
+                                cls="p-6 relative"
+                            ),
+                            cls="border-2 border-dashed rounded-lg border-gray-300 hover:border-primary transition-colors"
+                        ),
+                        Button("Upload Files", cls=(ButtonT.primary, "w-full mt-4")),
+                        hx_post="/upload",
+                        hx_target="#uploaded-files",
+                        hx_swap="outerHTML"
+                    ),
+                    Div(id="uploaded-files", cls="mt-4"),
+                ),
+                footer=P("Add images to enhance your post", cls=TextPresets.muted_sm),
+                cls="mb-6 shadow-md"
             ),
-            Div(id="uploaded-files"),
             render_post_form(active_accounts),
             id="post-content"
         )
 
-# Render uploaded files
 def render_uploaded_files():
     current_uploads = list(uploads())
     if not current_uploads:
         return Div(id="uploaded-files")
+    
     items = [
-        Li(
-            Span(upload.filename),
-            Button(UkIcon('x'), hx_delete=f"/delete_upload/{upload.id}", hx_target="#uploaded-files", hx_swap="outerHTML")
+        Div(
+            DivFullySpaced(
+                DivLAligned(
+                    get_file_icon(upload.filename),
+                    P(upload.filename, cls=(TextT.medium, "ml-2")),
+                ),
+                Button(
+                    UkIcon('x-circle', cls="text-red-500"),
+                    hx_delete=f"/delete_upload/{upload.id}",
+                    hx_target="#uploaded-files",
+                    hx_swap="outerHTML",
+                    cls=ButtonT.ghost
+                ),
+            ),
+            cls="p-3 border rounded-md mb-2 transition-colors"
         ) for upload in current_uploads
     ]
-    return Ul(*items, id="uploaded-files", cls="mt-2")
+    
+    return Div(
+        Div(
+            DivLAligned(
+                UkIcon('check-circle', cls="text-green-500 mr-2"),
+                H4(f"{len(current_uploads)} Files Ready to Upload", cls=TextT.medium)
+            ),
+            cls="mb-3"
+        ),
+        *items,
+        id="uploaded-files",
+        cls="mt-4"
+    )
+
+# Helper function to determine appropriate icon based on file type
+def get_file_icon(filename):
+    ext = filename.lower().split('.')[-1] if '.' in filename else ''
+    icon_name = 'file'
+    
+    if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
+        icon_name = 'image'
+    elif ext in ['mp4', 'mov', 'avi', 'webm']:
+        icon_name = 'video'
+    elif ext in ['mp3', 'wav', 'ogg']:
+        icon_name = 'music'
+    elif ext in ['pdf']:
+        icon_name = 'file-text'
+    
+    return UkIcon(icon_name, cls="text-gray-500")
 
 # File upload route
 @rt("/upload")
