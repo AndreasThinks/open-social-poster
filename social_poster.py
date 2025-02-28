@@ -95,36 +95,43 @@ def render_post_tab(active_accounts):
         return Div(P("Please connect at least one social media account to post messages."), id="post-content")
     else:
         return Div(
-            Card(
-                CardHeader(
-                    DivLAligned(UkIcon('image'), H3("Media Attachments"))
+            Details(
+                Summary(
+                    DivLAligned(
+                        UkIcon('image', cls="mr-2"),
+                        P("Add Media", cls=TextT.medium),
+                        cls="flex items-center cursor-pointer hover:text-primary transition-colors"
+                    ),
+                    cls="py-2"
                 ),
-                CardBody(
+                Div(
                     Form(
-                        Div(
-                            DivCentered(
-                                UkIcon('upload', height=36, width=36, cls="mb-2"),
-                                H4("Drop files here or click to browse"),
+                        DivLAligned(
+                            Div(
                                 Input(
                                     type="file", 
                                     multiple=True, 
                                     name="files", 
                                     cls="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                 ),
-                                cls="p-6 relative"
+                                UkIcon('upload', cls="mr-2"),
+                                P("Select files", cls=TextT.sm),
+                                cls="relative border border-gray-300 rounded p-2 hover:bg-gray-50 transition-colors"
                             ),
-                            cls="border-2 border-dashed rounded-lg border-gray-300 hover:border-primary transition-colors"
+                            Button("Upload", 
+                                   cls=(ButtonT.secondary, "text-sm px-3 py-1 ml-2"),
+                                   hx_disable_elt="this"),
+                            cls="w-full"
                         ),
-                        Button("Upload Files", cls=(ButtonT.primary, "w-full mt-4")),
                         hx_post="/upload",
                         hx_target="#uploaded-files",
                         hx_swap="outerHTML"
                     ),
-                    Div(id="uploaded-files", cls="mt-4"),
+                    cls="pt-1 pb-3"
                 ),
-                footer=P("Add images to enhance your post", cls=TextPresets.muted_sm),
-                cls="mb-6 shadow-md"
+                cls="border-b mb-4"
             ),
+            Div(id="uploaded-files", cls="mb-4"),
             render_post_form(active_accounts),
             id="post-content"
         )
@@ -134,37 +141,41 @@ def render_uploaded_files():
     if not current_uploads:
         return Div(id="uploaded-files")
     
-    items = [
+    file_items = [
         Div(
-            DivFullySpaced(
-                DivLAligned(
-                    get_file_icon(upload.filename),
-                    P(upload.filename, cls=(TextT.medium, "ml-2")),
-                ),
+            DivLAligned(
+                get_file_icon(upload.filename),
+                P(truncate_filename(upload.filename), cls="ml-1 text-sm"),
                 Button(
-                    UkIcon('x-circle', cls="text-red-500"),
+                    UkIcon('x', cls="h-4 w-4 text-red-500"),
                     hx_delete=f"/delete_upload/{upload.id}",
                     hx_target="#uploaded-files",
                     hx_swap="outerHTML",
-                    cls=ButtonT.ghost
+                    cls="ml-2 p-0"
                 ),
-            ),
-            cls="p-3 border rounded-md mb-2 transition-colors"
+                cls="py-1 px-2 rounded-md mr-2 mb-2"
+            )
         ) for upload in current_uploads
     ]
     
     return Div(
         Div(
             DivLAligned(
-                UkIcon('check-circle', cls="text-green-500 mr-2"),
-                H4(f"{len(current_uploads)} Files Ready to Upload", cls=TextT.medium)
+                P(f"{len(current_uploads)} file(s) attached", cls="text-sm text-primary font-medium"),
+                cls="mt-1 mb-2"
             ),
-            cls="mb-3"
+            Div(cls="flex flex-wrap")(*file_items),
         ),
-        *items,
         id="uploaded-files",
-        cls="mt-4"
     )
+
+def truncate_filename(filename, max_length=20):
+    """Truncate filename if it's too long"""
+    if len(filename) <= max_length:
+        return filename
+    ext = filename.split('.')[-1] if '.' in filename else ''
+    name = filename[:max_length-len(ext)-3] + '...' + ('.' + ext if ext else '')
+    return name
 
 # Helper function to determine appropriate icon based on file type
 def get_file_icon(filename):
