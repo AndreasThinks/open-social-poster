@@ -1,3 +1,13 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "atproto",
+#     "monsterui",
+#     "python-fasthtml",
+#     "requests",
+#     "selenium",
+# ]
+# ///
 from fasthtml.common import *
 from monsterui.all import *
 import os
@@ -63,7 +73,6 @@ def get():
 # Render accounts tab content
 def render_accounts_tab(active_accounts):
     return Div(
-        H2("Your Connected Accounts"),
         render_connected_accounts(active_accounts),
         H2("Connect a New Account"),
         render_connection_forms(),
@@ -93,7 +102,8 @@ def render_connected_accounts(active_accounts):
             cls=CardT.hover
         ) for account in active_accounts
     ]
-    return Grid(*account_divs, cols=1)
+    return (H2("Your Connected Accounts"),
+            Grid(*account_divs, cols=1))
 
 # Render connection forms
 def render_connection_forms():
