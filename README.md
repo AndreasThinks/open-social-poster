@@ -2,6 +2,8 @@
 
 An open-source, unified social media management tool that lets you post content and media to multiple platforms simultaneously.
 
+![Social Poster Screenshot](/screenshots/example_screenshot.png)
+
 ## Features
 
 - **Multi-platform Support**: Post to Bluesky, Twitter/X, and Mastodon from a single interface
